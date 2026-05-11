@@ -18,18 +18,26 @@ def store_kvcache_kernel(
     slot_mapping_ptr,
     D: tl.constexpr,
 ):
+    # 获取第idx个token的缓存槽位号
     idx = tl.program_id(0)
+    # 从slot_mapping中读取第idx个token对应的缓存槽位号，指明token写入位置
     slot = tl.load(slot_mapping_ptr + idx)
+    # 若槽位号为 -1，该token不需缓存
     if slot == -1: return
+    # 计算第idx个token的key在内存中的偏移量
     key_offsets = idx * key_stride + tl.arange(0, D)
+    # 计算v的偏移量
     value_offsets = idx * value_stride + tl.arange(0, D)
+    # 加载第idx个token的k和v数据
     key = tl.load(key_ptr + key_offsets)
     value = tl.load(value_ptr + value_offsets)
+
     cache_offsets = slot * D + tl.arange(0, D)
+    # 写入k、v
     tl.store(k_cache_ptr + cache_offsets, key)
     tl.store(v_cache_ptr + cache_offsets, value)
 
-
+# 写入kvcache
 def store_kvcache(key: torch.Tensor, value: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, slot_mapping: torch.Tensor):
     N, num_heads, head_dim = key.shape
     D = num_heads * head_dim
@@ -59,9 +67,11 @@ class Attention(nn.Module):
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
         context = get_context()
         k_cache, v_cache = self.k_cache, self.v_cache
+        #写入分页缓存
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
         if context.is_prefill:
+            # 前缀缓存
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache
             o = flash_attn_varlen_func(q, k, v,
