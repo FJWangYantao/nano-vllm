@@ -28,18 +28,18 @@ class BlockManager:
     def __init__(self, num_blocks: int, block_size: int):
         self.block_size = block_size
         self.blocks: list[Block] = [Block(i) for i in range(num_blocks)]
-        # 用于构建链式hash值
+        # 用于构建链式 hash 值
         self.hash_to_block_id: dict[int, int] = dict()
         self.free_block_ids: deque[int] = deque(range(num_blocks))
         self.used_block_ids: set[int] = set()
 
-    # 链式hash实现
-    # 基于token_ids和prefix生成了一个hash值
+    # 链式 hash 实现
+    # 基于 token_ids 和 prefix 生成了一个 hash 值
     @classmethod
     def compute_hash(cls, token_ids: list[int], prefix: int = -1):
-        # 非加密hash，适合缓存索引
+        # 非加密 hash，适合缓存索引
         h = xxhash.xxh64()
-        # 前缀不为空，则前一个块prefix作为8字节数据放入
+        # 前缀不为空，则前一个块 prefix 作为8字节数据放入
         if prefix != -1:
             h.update(prefix.to_bytes(8, "little"))
         h.update(np.array(token_ids).tobytes())
@@ -51,11 +51,20 @@ class BlockManager:
         assert block.ref_count == 0
         # 判断 hash 条目是否还指向自身，防止误删已覆盖
         # 啥情况下会覆盖？
-        # 比如同样开头的两个句子“你好世界”，“你好小明”
-        # 假设被分为[“你好”，“世界”]、[“你好”，“小明”]
-        # 两个“你好”会被映射到相同的位置，比如先映射了A的你好，那么B的你好在缓存的时候就把它覆盖掉
-        # 现在假设A的物理块已经回收了，要分配A的你好所在的物理块
-        # 此时这里就会判断这个你好是否是A的你好，防止误删B缓存的你好，使B的整个前缀缓存崩溃
+        # 考察两个句子“你好世界”，“hi小明”
+        # 假设被分为 A:[“你好”，“世界”]、B:[“hi”，“小明”]，
+        # 假设 hash(你好) == hash(小明) = 100
+        # 首先 假设 hash(你好) 先进入 hash_to_block_id(100,0)
+        # 表示 hash 为 100 的 token 放在 block0
+        # hash(世界) = 200  hash_to_block_id(200,1)
+        # hash(hi) = 300 hash_to_block_id(300,2)
+        # KEY : hash(小明) = 100 覆盖 hash_to_block_id(100,3)
+        # 此时 hash 100 的值已经被映射到 block3
+        # 当“你好”被释放后，block 0 被释放，加入空闲队列(内容没清空 block.hash = 100)
+        # 现在一个新的 token 进来，准备拿走一个块，拿到了这个 block 0
+        # 此时就进入这里判断 block_id = 0 是否等于 hash_to_block_id.get(100) = 3
+        # 0 != 3 不能够删除（此时已经被覆盖，不必再删除）
+        # dellocate 时保留 block.hash 就是为了防止误删
         if block.hash != -1 and self.hash_to_block_id.get(block.hash) == block_id:
             del self.hash_to_block_id[block.hash]
         block.reset()
@@ -78,6 +87,7 @@ class BlockManager:
             h = self.compute_hash(token_ids, h)
             block_id = self.hash_to_block_id.get(h, -1)
             # 哈希表中没有这个内容或哈希命中但发生碰撞，链式哈希查找失败！
+            # 即使 hash 碰撞了，因为这边的 token_ids 检测，也不会出错，直接中断匹配
             if block_id == -1 or self.blocks[block_id].token_ids != token_ids:
                 break
             num_cached_blocks += 1
