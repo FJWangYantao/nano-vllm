@@ -18,22 +18,23 @@ def store_kvcache_kernel(
     slot_mapping_ptr,
     D: tl.constexpr,
 ):
-    # 获取第idx个token的缓存槽位号
+    # 获取第 idx 个 token 的缓存槽位号
     idx = tl.program_id(0)
-    # 从slot_mapping中读取第idx个token对应的缓存槽位号，指明token写入位置
+    # 从 slot_mapping 中读取第 idx 个 token 对应的缓存槽位号，
+    # 指明 token 写入位置
     slot = tl.load(slot_mapping_ptr + idx)
     # 若槽位号为 -1，该token不需缓存
     if slot == -1: return
-    # 计算第idx个token的key在内存中的偏移量
+    # 计算第 idx 个 token 的 key 在内存中的偏移量
     key_offsets = idx * key_stride + tl.arange(0, D)
-    # 计算v的偏移量
+    # 计算 v 的偏移量
     value_offsets = idx * value_stride + tl.arange(0, D)
-    # 加载第idx个token的k和v数据
+    # 加载第 idx 个 token 的 k 和 v 数据
     key = tl.load(key_ptr + key_offsets)
     value = tl.load(value_ptr + value_offsets)
 
     cache_offsets = slot * D + tl.arange(0, D)
-    # 写入k、v
+    # 写入 k、v
     tl.store(k_cache_ptr + cache_offsets, key)
     tl.store(v_cache_ptr + cache_offsets, value)
 
@@ -67,7 +68,7 @@ class Attention(nn.Module):
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
         context = get_context()
         k_cache, v_cache = self.k_cache, self.v_cache
-        #写入分页缓存
+        # 若缓存已分配，把新 token 的 KV 写入分页缓存
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
         if context.is_prefill:

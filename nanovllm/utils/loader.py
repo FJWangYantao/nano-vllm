@@ -4,11 +4,11 @@ import torch
 from torch import nn
 from safetensors import safe_open
 
-
+# 默认权重加载器
 def default_weight_loader(param: nn.Parameter, loaded_weight: torch.Tensor):
     param.data.copy_(loaded_weight)
 
-
+# 加载模型权重
 def load_model(model: nn.Module, path: str):
     packed_modules_mapping = getattr(model, "packed_modules_mapping", {})
     for file in glob(os.path.join(path, "*.safetensors")):

@@ -149,7 +149,7 @@ class BlockManager:
                 self._deallocate_block(block_id)
         seq.num_cached_tokens = 0
         seq.block_table.clear()
-x
+
     def can_append(self, seq: Sequence) -> bool:
         # 巧妙的布尔表达式
         # 结合seq超出blocksize的部分是否为刚好为1

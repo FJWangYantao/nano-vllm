@@ -2,7 +2,7 @@ from functools import lru_cache
 import torch
 from torch import nn
 
-
+# RoPE 嵌入
 def apply_rotary_emb(
     x: torch.Tensor,
     cos: torch.Tensor,
@@ -31,9 +31,11 @@ class RotaryEmbedding(nn.Module):
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
         cos = freqs.cos()
         sin = freqs.sin()
+        # 旋转后拼成缓存
         cache = torch.cat((cos, sin), dim=-1).unsqueeze_(1)
         self.register_buffer("cos_sin_cache", cache, persistent=False)
 
+    # 前向传播，获取旋转后的 query 和 key
     @torch.compile
     def forward(
         self,
@@ -47,7 +49,7 @@ class RotaryEmbedding(nn.Module):
         key = apply_rotary_emb(key, cos, sin)
         return query, key
 
-
+# 新建 RoPE 嵌入实例
 @lru_cache(1)
 def get_rope(
     head_size: int,

@@ -13,6 +13,7 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
+    # 直接归一化，无残差连接
     @torch.compile
     def rms_forward(
         self,
@@ -25,6 +26,7 @@ class RMSNorm(nn.Module):
         x = x.to(orig_dtype).mul_(self.weight)
         return x
 
+    # 残差连接并 RMSNorm 归一化
     @torch.compile
     def add_rms_forward(
         self,

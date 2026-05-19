@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import torch
 
-
+# 进程内全局推理的上下文，用于ModelRunner每次 forward 时写入元数据
 @dataclass(slots=True)
 class Context:
     is_prefill: bool = False
@@ -15,6 +15,7 @@ class Context:
 
 _CONTEXT = Context()
 
+# 获取、设置、重置上下文
 def get_context():
     return _CONTEXT
 

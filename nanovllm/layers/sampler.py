@@ -4,6 +4,8 @@ from torch import nn
 
 class Sampler(nn.Module):
 
+    # 对 logits 进行温度缩放，然后做 softmax
+    # 最后进行 Gumbel-Max 采样
     @torch.compile
     def forward(self, logits: torch.Tensor, temperatures: torch.Tensor):
         logits = logits.float().div_(temperatures.unsqueeze(dim=1))
