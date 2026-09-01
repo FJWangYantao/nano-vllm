@@ -1,5 +1,8 @@
 from collections import deque
-import xxhash
+try:
+    import xxhash
+except ImportError:
+    xxhash = None
 import numpy as np
 
 from nanovllm.engine.sequence import Sequence
@@ -25,8 +28,9 @@ class Block:
 
 class BlockManager:
 
-    def __init__(self, num_blocks: int, block_size: int):
+    def __init__(self, num_blocks: int, block_size: int, collector=None):
         self.block_size = block_size
+        self.collector = collector
         self.blocks: list[Block] = [Block(i) for i in range(num_blocks)]
         # 用于构建链式 hash 值
         self.hash_to_block_id: dict[int, int] = dict()
@@ -38,6 +42,7 @@ class BlockManager:
     @classmethod
     def compute_hash(cls, token_ids: list[int], prefix: int = -1):
         # 非加密 hash，适合缓存索引
+        assert xxhash is not None, "xxhash library is required for prefix caching hash computation"
         h = xxhash.xxh64()
         # 前缀不为空，则前一个块 prefix 作为8字节数据放入
         if prefix != -1:
@@ -98,6 +103,8 @@ class BlockManager:
         if len(self.free_block_ids) < num_new_blocks:
             return -1
         # 足够分配，则返回已缓存的块数
+        if self.collector is not None:
+            self.collector.on_prefix_cache_lookup(num_cached_blocks, seq.num_blocks)
         return num_cached_blocks
 
     # seq 需分配物理块的序列

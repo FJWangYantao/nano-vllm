@@ -10,12 +10,13 @@ from nanovllm.engine.block_manager import BlockManager
 # decode 处理数：一次调度处理一个 token
 class Scheduler:
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, collector=None):
         self.max_num_seqs = config.max_num_seqs
         self.max_num_batched_tokens = config.max_num_batched_tokens
         self.eos = config.eos
         self.block_size = config.kvcache_block_size
-        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)
+        self.collector = collector
+        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size, collector=collector)
         self.waiting: deque[Sequence] = deque()
         self.running: deque[Sequence] = deque()
 
@@ -102,6 +103,8 @@ class Scheduler:
     # 放到 waiting 队列
     # 释放物理块
     def preempt(self, seq: Sequence):
+        if self.collector is not None:
+            self.collector.on_preemption(seq.seq_id)
         seq.status = SequenceStatus.WAITING
         seq.is_prefill = True
         self.block_manager.deallocate(seq)

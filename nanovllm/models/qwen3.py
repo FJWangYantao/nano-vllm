@@ -1,7 +1,13 @@
 import torch
 from torch import nn
 import torch.distributed as dist
-from transformers import Qwen3Config
+try:
+    from transformers import Qwen3Config
+except ImportError:
+    try:
+        from transformers import Qwen2Config as Qwen3Config
+    except ImportError:
+        Qwen3Config = None
 
 from nanovllm.layers.activation import SiluAndMul
 from nanovllm.layers.attention import Attention

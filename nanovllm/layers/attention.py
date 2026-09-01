@@ -1,42 +1,53 @@
 import torch
 from torch import nn
-import triton
-import triton.language as tl
+try:
+    import triton
+    import triton.language as tl
+except ImportError:
+    triton = None
+    tl = None
 
-from flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache
+try:
+    from flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache
+except ImportError:
+    flash_attn_varlen_func = None
+    flash_attn_with_kvcache = None
 from nanovllm.utils.context import get_context
 
 
-@triton.jit
-def store_kvcache_kernel(
-    key_ptr,
-    key_stride,
-    value_ptr,
-    value_stride,
-    k_cache_ptr,
-    v_cache_ptr,
-    slot_mapping_ptr,
-    D: tl.constexpr,
-):
-    # 获取第 idx 个 token 的缓存槽位号
-    idx = tl.program_id(0)
-    # 从 slot_mapping 中读取第 idx 个 token 对应的缓存槽位号，
-    # 指明 token 写入位置
-    slot = tl.load(slot_mapping_ptr + idx)
-    # 若槽位号为 -1，该token不需缓存
-    if slot == -1: return
-    # 计算第 idx 个 token 的 key 在内存中的偏移量
-    key_offsets = idx * key_stride + tl.arange(0, D)
-    # 计算 v 的偏移量
-    value_offsets = idx * value_stride + tl.arange(0, D)
-    # 加载第 idx 个 token 的 k 和 v 数据
-    key = tl.load(key_ptr + key_offsets)
-    value = tl.load(value_ptr + value_offsets)
+if triton is not None:
+    @triton.jit
+    def store_kvcache_kernel(
+        key_ptr,
+        key_stride,
+        value_ptr,
+        value_stride,
+        k_cache_ptr,
+        v_cache_ptr,
+        slot_mapping_ptr,
+        D: tl.constexpr,
+    ):
+        # 获取第 idx 个 token 的缓存槽位号
+        idx = tl.program_id(0)
+        # 从 slot_mapping 中读取第 idx 个 token 对应的缓存槽位号，
+        # 指明 token 写入位置
+        slot = tl.load(slot_mapping_ptr + idx)
+        # 若槽位号为 -1，该token不需缓存
+        if slot == -1: return
+        # 计算第 idx 个 token 的 key 在内存中的偏移量
+        key_offsets = idx * key_stride + tl.arange(0, D)
+        # 计算 v 的偏移量
+        value_offsets = idx * value_stride + tl.arange(0, D)
+        # 加载第 idx 个 token 的 k 和 v 数据
+        key = tl.load(key_ptr + key_offsets)
+        value = tl.load(value_ptr + value_offsets)
 
-    cache_offsets = slot * D + tl.arange(0, D)
-    # 写入 k、v
-    tl.store(k_cache_ptr + cache_offsets, key)
-    tl.store(v_cache_ptr + cache_offsets, value)
+        cache_offsets = slot * D + tl.arange(0, D)
+        # 写入 k、v
+        tl.store(k_cache_ptr + cache_offsets, key)
+        tl.store(v_cache_ptr + cache_offsets, value)
+else:
+    store_kvcache_kernel = None
 
 # 写入kvcache
 def store_kvcache(key: torch.Tensor, value: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, slot_mapping: torch.Tensor):

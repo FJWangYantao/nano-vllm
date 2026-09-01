@@ -16,6 +16,8 @@ class Config:
     eos: int = -1
     kvcache_block_size: int = 256
     num_kvcache_blocks: int = -1
+    enable_monitoring: bool = False
+    export_metrics_json: str | None = None
 
     def __post_init__(self):
         assert os.path.isdir(self.model)

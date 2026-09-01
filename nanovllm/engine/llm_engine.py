@@ -10,6 +10,9 @@ from nanovllm.sampling_params import SamplingParams
 from nanovllm.engine.sequence import Sequence
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
+from nanovllm.monitor.collector import MetricsCollector
+from nanovllm.monitor.exporter import ConsoleExporter, JsonExporter
+from nanovllm.monitor.profiler import Profiler
 
 
 class LLMEngine:
@@ -38,7 +41,19 @@ class LLMEngine:
         self.model_runner = ModelRunner(config, 0, self.events)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
-        self.scheduler = Scheduler(config)
+        
+        # 运行时监控系统初始化
+        self.config = config
+        self.collector = MetricsCollector(config) if config.enable_monitoring else None
+        self.scheduler = Scheduler(config, collector=self.collector)
+        if self.collector is not None:
+            self.collector.set_components(self.scheduler, self.scheduler.block_manager)
+            self.console_exporter = ConsoleExporter()
+            self.json_exporter = JsonExporter(config.export_metrics_json) if config.export_metrics_json else None
+        else:
+            self.console_exporter = None
+            self.json_exporter = None
+
         atexit.register(self.exit)
 
     # 定义退出函数，清理引擎资源
@@ -57,6 +72,8 @@ class LLMEngine:
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
         seq = Sequence(prompt, sampling_params)
+        if self.collector is not None:
+            self.collector.on_request_arrive(seq)
         self.scheduler.add(seq)
 
     # 让调度器决定这一轮处理哪些序列
@@ -67,11 +84,33 @@ class LLMEngine:
     # 结果交由调度器做后处理
     # 收集本轮完成的序列的 ID 和 token_ids
     def step(self):
+        t_start = perf_counter()
+        if self.collector is not None:
+            self.collector.on_step_start()
+        
         seqs, is_prefill = self.scheduler.schedule()
         num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
         self.scheduler.postprocess(seqs, token_ids, is_prefill)
+        
         outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
+        
+        if self.collector is not None:
+            # 记录请求完成/TTFT等生命周期事件
+            for seq in seqs:
+                if seq.is_finished:
+                    self.collector.on_request_finish(seq)
+                elif len(seq.completion_token_ids) == 1:
+                    self.collector.on_request_first_token(seq)
+            
+            step_duration = perf_counter() - t_start
+            self.collector.on_step_finish(
+                is_prefill=is_prefill,
+                num_scheduled_tokens=abs(num_tokens),
+                num_seqs=len(seqs),
+                step_duration=step_duration,
+            )
+            
         return outputs, num_tokens
 
     # 判定所有请求是否都完成
@@ -116,6 +155,15 @@ class LLMEngine:
                 outputs[seq_id] = token_ids
                 pbar.update(1)
         pbar.close()
+
+        # 导出/打印监控指标
+        if self.collector is not None:
+            summary = self.collector.get_summary()
+            if self.console_exporter is not None:
+                self.console_exporter.export(summary)
+            if self.json_exporter is not None:
+                self.json_exporter.export(summary)
+
         # 排序 seq 结果
         outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
         # token_id 转文本
